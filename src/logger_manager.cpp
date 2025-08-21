@@ -50,7 +50,7 @@ void LoggerManager::initialize(const QString &logFilePath)
 
         // 使用daily_file_sink，每天自动创建新文件，在凌晨0:0切换
         file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(
-            logFileBase.toStdString(), 0, 0, false, 365); // 凌晨0点0分切换到新文件
+            logFileBase.toStdString(), 0, 0); // 凌晨0点0分切换到新文件
         setLogLevel(file_sink);
         // 添加线程ID (%t) 和线程名 (%T) 到格式中
         file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%P/%t] [%l]\t[%n] - %v");
