@@ -2,125 +2,140 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QCoreApplication>
-#include "config_util.h"
+#include <QDateTime>
 
-LoggerManager& LoggerManager::instance()
+LoggerManager &LoggerManager::instance()
 {
     static LoggerManager instance;
     return instance;
 }
 
+void LoggerManager::setLogLevel(spdlog::level::level_enum level)
+{
+    m_logLevel = level;
+    setLogLevel(console_sink);
+    setLogLevel(file_sink);
+}
+
 spdlog::level::level_enum LoggerManager::getLogLevel() const
 {
-    if(ConfigUtil->logLevel == "debug") {
-        return spdlog::level::debug;
-    } else if(ConfigUtil->logLevel == "info") {
-        return spdlog::level::info;
-    } else if(ConfigUtil->logLevel == "warn") {
-        return spdlog::level::warn;
-    } else if(ConfigUtil->logLevel == "error") {
-        return spdlog::level::err;
-    } else {
-        return spdlog::level::off;
-    }
+    return m_logLevel;
 }
 
 void LoggerManager::setLogLevel(std::shared_ptr<spdlog::logger> logger) const
 {
+    if (!logger)
+        return;
     logger->set_level(getLogLevel());
 }
 
 void LoggerManager::setLogLevel(std::shared_ptr<spdlog::sinks::sink> sink) const
 {
+    if (!sink)
+        return;
     sink->set_level(getLogLevel());
 }
 
-void LoggerManager::initialize(const QString& logFilePath)
+void LoggerManager::initialize(const QString &logFilePath)
 {
-    if (m_initialized) {
+    if (m_initialized)
+    {
         return;
     }
-    
-    try {
-        // 设置日志文件路径
-        QString logPath = logFilePath;
-        if (logPath.isEmpty()) {
-            QString appDataPath = QCoreApplication::applicationDirPath() +"/logs";
-            QDir().mkpath(appDataPath);
-            logPath = appDataPath + "/app.log";
+
+    try
+    {
+        // 为日志文件名添加日期格式
+        QString basePath = logFilePath;
+        if (basePath.isEmpty())
+        {
+            basePath = QCoreApplication::applicationDirPath() + "/logs";
         }
-        
-        // 创建多个输出器：控制台 + 滚动文件
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        QDir().mkpath(basePath);
+        QString dateLogPath = basePath + "/" + QDateTime::currentDateTime().toString("yyyyMMdd") + ".log";
+
+        // 创建多个输出器：控制台 + 按日期和大小分割的文件
+        console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         setLogLevel(console_sink);
-        console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$]\t[%n]\t- %v");
-        
-        auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-            logPath.toStdString(), 1024 * 1024 * 10, 10); // 10MB per file, 10 files max
+        // 添加线程ID (%t) 和线程名 (%T) 到格式中
+        console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%P/%t] [%^%l%$]\t[%n] - %v");
+
+        // 使用旋转文件sink，当文件超过100MB时自动创建新文件
+        file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            dateLogPath.toStdString(), 1024 * 1024 * 100, 10); // 100MB per file, 10 files max per day
         setLogLevel(file_sink);
-        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%l]\t[%n]\t- %v");
+        // 添加线程ID (%t) 和线程名 (%T) 到格式中
+        file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%P/%t] [%l]\t[%n] - %v");
 
         // 创建logger
-        std::vector<spdlog::sink_ptr> sinks {console_sink, file_sink};
+        std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
         m_logger = std::make_shared<spdlog::logger>("default", sinks.begin(), sinks.end());
-        
+
         // 设置日志级别
         setLogLevel(m_logger);
         m_logger->flush_on(spdlog::level::info);
-        
+
         // 注册到spdlog
         spdlog::register_logger(m_logger);
         spdlog::set_default_logger(m_logger);
-        
+
         m_initialized = true;
-        m_logger->info("Logger initialized, log file: {}", logPath.toStdString());
-        
-    } catch (const spdlog::spdlog_ex& ex) {
+        m_logger->info("Logger initialized, log file: {}", dateLogPath.toStdString());
+    }
+    catch (const spdlog::spdlog_ex &ex)
+    {
         // 如果初始化失败，创建一个简单的控制台logger
-        m_logger = spdlog::stdout_color_mt("AiRan_fallback");
+        m_logger = spdlog::stdout_color_mt("log_fallback");
         m_logger->error("Log initialization failed: {}", ex.what());
         m_initialized = true;
     }
 }
 
-std::shared_ptr<spdlog::logger> LoggerManager::getLogger(const QString& name)
+std::shared_ptr<spdlog::logger> LoggerManager::getLogger(const QString &name)
 {
-    if (!m_initialized) {
+    if (!m_initialized)
+    {
         initialize();
     }
-    QString funcName=name;
+    QString funcName = name;
     int pos = funcName.indexOf("::<lambda");
     funcName = (pos != -1) ? funcName.left(pos) : funcName; // 找到则截取，否则返回原串
 
-    if (funcName == "default" || funcName.isEmpty()) {
+    if (funcName == "default" || funcName.isEmpty())
+    {
         return m_logger;
     }
-    
+
     // 返回指定名称的logger，如果不存在则创建
     auto logger = spdlog::get(funcName.toStdString());
-    if (!logger) {
+    if (!logger)
+    {
         // 创建新的logger，使用与默认logger相同的输出器和设置
-        try {
+        try
+        {
             // 获取默认logger的输出器
             auto sinks = m_logger->sinks();
-            
+
             // 创建新的logger
             logger = std::make_shared<spdlog::logger>(funcName.toStdString(), sinks.begin(), sinks.end());
-            
+
             // 设置与默认logger相同的日志级别
             setLogLevel(logger);
-            
+
             // 设置刷新级别
             logger->flush_on(spdlog::level::info);
-            
+
             // 注册新的logger
             spdlog::register_logger(logger);
-            
-        } catch (const spdlog::spdlog_ex& ex) {
+        }
+        catch (const spdlog::spdlog_ex &ex)
+        {
             // 如果创建失败，返回默认logger
             m_logger->error("Failed to create logger '{}': {}", funcName.toStdString(), ex.what());
             logger = m_logger;
         }
     }
+    setLogLevel(logger);
     return logger;
 }
+
