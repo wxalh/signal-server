@@ -72,7 +72,6 @@ public:
     static LoggerManager& instance();
 
     void initialize(const QString& logFilePath = "");
-    void setLogLevel(spdlog::level::level_enum level);
     std::shared_ptr<spdlog::logger> getLogger(const QString& name = "default");
 
     // 便捷的日志宏
@@ -114,13 +113,11 @@ private:
     LoggerManager& operator=(const LoggerManager&) = delete;
     
     // 私有帮助方法
-    spdlog::level::level_enum getLogLevel() const;
     void setLogLevel(std::shared_ptr<spdlog::logger> logger) const;
     void setLogLevel(std::shared_ptr<spdlog::sinks::sink> sink) const;
     
     std::shared_ptr<spdlog::logger> m_logger;
     bool m_initialized = false;
-    spdlog::level::level_enum m_logLevel = spdlog::level::info;
     std::shared_ptr<spdlog::sinks::stdout_color_sink_mt> console_sink;
     std::shared_ptr<spdlog::sinks::daily_file_sink_mt> file_sink;
 };

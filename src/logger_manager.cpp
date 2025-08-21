@@ -1,4 +1,5 @@
 #include "logger_manager.h"
+#include "config_util.h"
 #include <QDir>
 #include <QStandardPaths>
 #include <QCoreApplication>
@@ -10,30 +11,18 @@ LoggerManager &LoggerManager::instance()
     return instance;
 }
 
-void LoggerManager::setLogLevel(spdlog::level::level_enum level)
-{
-    m_logLevel = level;
-    setLogLevel(console_sink);
-    setLogLevel(file_sink);
-}
-
-spdlog::level::level_enum LoggerManager::getLogLevel() const
-{
-    return m_logLevel;
-}
-
 void LoggerManager::setLogLevel(std::shared_ptr<spdlog::logger> logger) const
 {
     if (!logger)
         return;
-    logger->set_level(getLogLevel());
+    logger->set_level(ConfigUtil->logLevel);
 }
 
 void LoggerManager::setLogLevel(std::shared_ptr<spdlog::sinks::sink> sink) const
 {
     if (!sink)
         return;
-    sink->set_level(getLogLevel());
+    sink->set_level(ConfigUtil->logLevel);
 }
 
 void LoggerManager::initialize(const QString &logFilePath)

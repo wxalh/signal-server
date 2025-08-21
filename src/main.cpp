@@ -58,9 +58,6 @@ int main(int argc, char *argv[])
     // Initialize configuration first
     ConfigUtil; // This will initialize the singleton and load config.ini
     
-    // Initialize logger
-    LoggerManager::instance().initialize();
-    
     // Get server configuration from config file
     quint16 port = ConfigUtil->serverPort;
     QString serverName = ConfigUtil->serverName;

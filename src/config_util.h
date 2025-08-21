@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QSettings>
 #include <QUuid>
+#include <spdlog/spdlog.h>
 
 #define ConfigUtil ConfigUtilData::getInstance()
 
@@ -21,7 +22,7 @@ public:
     quint16 serverPort;
     QString serverName;
 
-    QString logLevel;
+    spdlog::level::level_enum logLevel;
 signals:
 };
 
