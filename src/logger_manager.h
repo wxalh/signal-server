@@ -7,7 +7,7 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/daily_file_sink.h>
 
 // 为QString添加fmt格式化器支持
 #include <fmt/format.h>
@@ -122,7 +122,7 @@ private:
     bool m_initialized = false;
     spdlog::level::level_enum m_logLevel = spdlog::level::info;
     std::shared_ptr<spdlog::sinks::stdout_color_sink_mt> console_sink;
-    std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_sink;
+    std::shared_ptr<spdlog::sinks::daily_file_sink_mt> file_sink;
 };
 
 #define LOG_GENERIC(LOGGER_PTR, LEVEL, FMT, ...) \

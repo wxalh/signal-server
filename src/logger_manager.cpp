@@ -45,24 +45,23 @@ void LoggerManager::initialize(const QString &logFilePath)
 
     try
     {
-        // 为日志文件名添加日期格式
-        QString basePath = logFilePath;
-        if (basePath.isEmpty())
+        // 设置日志文件基础路径
+        QString logFileBase = logFilePath;
+        if (logFileBase.isEmpty())
         {
-            basePath = QCoreApplication::applicationDirPath() + "/logs";
+            logFileBase = QCoreApplication::applicationDirPath() + "/logs";
         }
-        QDir().mkpath(basePath);
-        QString dateLogPath = basePath + "/" + QDateTime::currentDateTime().toString("yyyyMMdd") + ".log";
-
-        // 创建多个输出器：控制台 + 按日期和大小分割的文件
+        QDir().mkpath(logFileBase);
+        logFileBase += "/signal_server";
+        // 创建多个输出器：控制台 + 按日期分割的文件
         console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         setLogLevel(console_sink);
         // 添加线程ID (%t) 和线程名 (%T) 到格式中
         console_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%P/%t] [%^%l%$]\t[%n] - %v");
 
-        // 使用旋转文件sink，当文件超过100MB时自动创建新文件
-        file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-            dateLogPath.toStdString(), 1024 * 1024 * 100, 10); // 100MB per file, 10 files max per day
+        // 使用daily_file_sink，每天自动创建新文件，在凌晨0:0切换
+        file_sink = std::make_shared<spdlog::sinks::daily_file_sink_mt>(
+            logFileBase.toStdString(), 0, 0, false, 365); // 凌晨0点0分切换到新文件
         setLogLevel(file_sink);
         // 添加线程ID (%t) 和线程名 (%T) 到格式中
         file_sink->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%P/%t] [%l]\t[%n] - %v");
@@ -80,7 +79,7 @@ void LoggerManager::initialize(const QString &logFilePath)
         spdlog::set_default_logger(m_logger);
 
         m_initialized = true;
-        m_logger->info("Logger initialized, log file: {}", dateLogPath.toStdString());
+        m_logger->info("Logger initialized, log files will be created daily in: {}", logFileBase.toStdString());
     }
     catch (const spdlog::spdlog_ex &ex)
     {
@@ -138,4 +137,3 @@ std::shared_ptr<spdlog::logger> LoggerManager::getLogger(const QString &name)
     setLogLevel(logger);
     return logger;
 }
-
