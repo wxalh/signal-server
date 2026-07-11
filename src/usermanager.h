@@ -1,46 +1,29 @@
-#ifndef USERMANAGER_H
-#define USERMANAGER_H
+#pragma once
 
-#include <QObject>
-#include <QHash>
-#include <QMutex>
 #include "rcsuser.h"
+#include <filesystem>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
-class UserManager : public QObject
-{
-    Q_OBJECT
-
+class UserManager {
 public:
-    explicit UserManager(QObject *parent = nullptr);
-    ~UserManager();
-
-    // User operations
-    bool tryGetRcsUserBySN(const QString &sn, RcsUser &user);
-    void insertRcsUser(const RcsUser &user);
-    void updateRcsUser(const RcsUser &user);
-    void deleteRcsUser(const QString &sn);
-
-    // Status operations
-    void setUserOnline(const QString &sn);
-    void setUserOffline(const QString &sn);
-    bool isUserOnline(const QString &sn);
-
-    // Singleton access
-    static UserManager &instance();
-
-signals:
-    void userOnline(const RcsUser &user);
-    void userOffline(const RcsUser &user);
-    void userUpdated(const RcsUser &user);
+    static UserManager& instance();
+    void initialize(const std::filesystem::path& applicationDir);
+    bool tryGetRcsUserBySN(const std::string& sn, RcsUser& user) const;
+    void insertRcsUser(const RcsUser& user);
+    void updateRcsUser(const RcsUser& user);
+    void deleteRcsUser(const std::string& sn);
+    void setUserOnline(const std::string& sn);
+    void setUserOffline(const std::string& sn);
+    bool isUserOnline(const std::string& sn) const;
 
 private:
-    QHash<QString, RcsUser> m_users;
-    QMutex m_mutex;
-    static UserManager *s_instance;
-
-    void saveUserToFile(const RcsUser &user);
+    UserManager() = default;
+    void saveUsersToFile();
     void loadUsersFromFile();
-    QString getUserDataFilePath() const;
-};
 
-#endif // USERMANAGER_H
+    mutable std::mutex m_mutex;
+    std::unordered_map<std::string, RcsUser> m_users;
+    std::filesystem::path m_filePath;
+};

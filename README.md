@@ -1,7 +1,7 @@
 
-# Signal Server - Qt5 C++ WebSocket信令服务器
+# Signal Server - C++ WebSocket信令服务器
 
-一个高性能的Qt5 C++实现的WebSocket信令服务器，支持实时通信与消息转发。
+一个轻量的 C++17 WebSocket 信令服务器，支持实时通信与消息转发。
 
 
 ## 功能特性
@@ -50,7 +50,7 @@
 
 ## 环境要求
 
-- **Qt5**：Core、Network、WebSockets模块
+- **C++17 编译器**：GCC 8+、Clang 8+ 或 MSVC 2019+
 - **CMake**：3.21及以上
 - **C++**：C++17标准
 - **编译器**：MSVC 2019+、GCC 8+、Clang 8+
@@ -61,12 +61,21 @@
 
 本项目使用了以下优秀的开源库：
 
-- **[Qt5](https://www.qt.io/)** - 跨平台 C++ 应用程序开发框架
-  - qt5-base (Core, GUI, Widgets, Network, Concurrent)
-  - qt5-websockets - WebSocket 通信支持
+- **[Asio](https://think-async.com/Asio/)** - 异步网络与事件循环
+- **[WebSocket++](https://github.com/zaphoyd/websocketpp)** - WebSocket 协议实现
+- **[nlohmann/json](https://github.com/nlohmann/json)** - JSON 解析与序列化
 - **[spdlog](https://github.com/gabime/spdlog)** - 快速 C++ 日志库
 
 ## 构建指南
+
+首次构建前先拉取第三方子模块：
+
+```bash
+git submodule update --init --recursive
+```
+
+Asio、WebSocket++ 和 nlohmann/json 是头文件库，不需要单独执行编译命令。CMake 在编译
+`signal_server` 时会自动使用这些头文件；spdlog 会由 CMake 构建为静态库并链接到程序中。
 
 #### windows前置要求
 
@@ -75,11 +84,23 @@
 #### 编译（根据系统选择不同的preset）
 
 ```cmd
-git submodule update --init --recursive
-
 cmake --preset win64-msvc-release
 cmake --build --preset win64-msvc-release
 ```
+
+可执行文件位于 `out/build/win64-msvc-release/Release/signal_server.exe`。
+
+#### Linux x86_64 本机构建
+
+需要安装 GCC、G++、CMake 3.21 或更高版本：
+
+```bash
+cmake --preset linux-x64
+cmake --build --preset linux-x64
+```
+
+可执行文件位于 `out/build/linux-x64/signal_server`。生成可发布压缩包请参阅
+[`PACKAGING.md`](PACKAGING.md)，不要将本机构建与 Zig 交叉编译发布流程混用。
 
 
 ## 使用方法
@@ -90,6 +111,14 @@ cmake --build --preset win64-msvc-release
 # 基本用法（自动读取 config.ini 配置）
 ./signal_server
 ```
+
+查看程序版本：
+
+```bash
+./signal_server --version
+```
+
+`-v`、`-V`、`--version` 和 `-version` 均可使用。版本参数会直接打印版本并退出，不会启动服务。
 
 服务器会自动读取与可执行文件同目录下的 `config.ini` 配置文件。
 
@@ -210,7 +239,7 @@ signal_server/
 
 ## 贡献指南
 
-1. 遵循Qt5编码规范
+1. 遵循 C++17 编码规范
 2. 保证共享资源线程安全
 3. 增加适当的错误处理与日志
 4. 新功能需同步更新文档
@@ -221,6 +250,6 @@ signal_server/
 ### 常见问题
 
 1. **端口被占用**：请修改 `config.ini` 中端口号
-2. **未找到Qt5**：确保Qt5已正确安装并加入PATH
-3. **编译失败**：检查CMake版本和Qt5模块可用性
+2. **子模块缺失**：执行 `git submodule update --init --recursive`
+3. **编译失败**：检查 CMake 版本和 C++17 编译器是否可用
 4. **连接被拒绝**：检查防火墙设置和端口开放情况

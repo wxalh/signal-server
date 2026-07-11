@@ -1,29 +1,22 @@
-#ifndef CONFIG_UTIL_H
-#define CONFIG_UTIL_H
+#pragma once
 
-#include <QObject>
-#include <QSettings>
-#include <QUuid>
+#include <cstdint>
+#include <filesystem>
+#include <string>
 #include <spdlog/spdlog.h>
 
 #define ConfigUtil ConfigUtilData::getInstance()
 
-class ConfigUtilData : public QObject
-{
-    Q_OBJECT
+class ConfigUtilData {
 public:
-    explicit ConfigUtilData(QObject *parent = nullptr);
-    ~ConfigUtilData();
     static ConfigUtilData* getInstance();
-public:
-    QString filePath;
-    QSettings *m_configIni;
-    // 服务器配置参数
-    quint16 serverPort;
-    QString serverName;
+    void load(const std::filesystem::path& applicationDir);
 
-    spdlog::level::level_enum logLevel;
-signals:
+    std::filesystem::path filePath;
+    std::uint16_t serverPort = 8080;
+    std::string serverName = "Signal Server";
+    spdlog::level::level_enum logLevel = spdlog::level::info;
+
+private:
+    ConfigUtilData() = default;
 };
-
-#endif // CONFIG_UTIL_H

@@ -1,241 +1,116 @@
 #include "usermanager.h"
 #include "logger_manager.h"
-#include <QStandardPaths>
-#include <QDir>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-#include <QFile>
-#include <QMutexLocker>
 
-UserManager *UserManager::s_instance = nullptr;
+#include <fstream>
+#include <nlohmann/json.hpp>
 
-UserManager::UserManager(QObject *parent)
-    : QObject(parent)
+UserManager& UserManager::instance()
 {
+    static UserManager instance;
+    return instance;
+}
+
+void UserManager::initialize(const std::filesystem::path& applicationDir)
+{
+    const auto directory = applicationDir / "data";
+    std::filesystem::create_directories(directory);
+    m_filePath = directory / "users.json";
     loadUsersFromFile();
 }
 
-UserManager::~UserManager()
+bool UserManager::tryGetRcsUserBySN(const std::string& sn, RcsUser& user) const
 {
-    // Save all users before destruction
-    QMutexLocker locker(&m_mutex);
-    for (const RcsUser &user : m_users)
-    {
-        saveUserToFile(user);
-    }
-}
-
-UserManager &UserManager::instance()
-{
-    if (!s_instance)
-    {
-        s_instance = new UserManager();
-    }
-    return *s_instance;
-}
-
-bool UserManager::tryGetRcsUserBySN(const QString &sn, RcsUser &user)
-{
-    QMutexLocker locker(&m_mutex);
-    auto it = m_users.find(sn);
-    if (it == m_users.end())
-    {
-        return false;
-    }
-    user = it.value();
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = m_users.find(sn);
+    if (it == m_users.end()) return false;
+    user = it->second;
     return true;
 }
 
-void UserManager::insertRcsUser(const RcsUser &user)
+void UserManager::insertRcsUser(const RcsUser& user) { updateRcsUser(user); }
+
+void UserManager::updateRcsUser(const RcsUser& user)
 {
     {
-        QMutexLocker locker(&m_mutex);
+        std::lock_guard<std::mutex> lock(m_mutex);
         m_users[user.getSn()] = user;
     }
-    saveUserToFile(user);
-
-    if (user.getStatus() == 1)
-    {
-        emit userOnline(user);
-    }
+    saveUsersToFile();
 }
 
-void UserManager::updateRcsUser(const RcsUser &user)
+void UserManager::deleteRcsUser(const std::string& sn)
 {
-    bool wasOnline = false;
-    bool isOnline = user.getStatus() == 1;
-
     {
-        QMutexLocker locker(&m_mutex);
-        auto it = m_users.find(user.getSn());
-        if (it != m_users.end())
-        {
-            wasOnline = it.value().getStatus() == 1;
-        }
-        m_users[user.getSn()] = user;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_users.erase(sn);
     }
-
-    saveUserToFile(user);
-    emit userUpdated(user);
-
-    // Emit status change signals
-    if (!wasOnline && isOnline)
-    {
-        emit userOnline(user);
-    }
-    else if (wasOnline && !isOnline)
-    {
-        emit userOffline(user);
-    }
+    saveUsersToFile();
 }
 
-void UserManager::deleteRcsUser(const QString &sn)
+void UserManager::setUserOnline(const std::string& sn)
 {
-    RcsUser user;
     {
-        QMutexLocker locker(&m_mutex);
-        auto it = m_users.find(sn);
-        if (it != m_users.end())
-        {
-            user = it.value();
-            m_users.erase(it);
-        }
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_users.find(sn);
+        if (it == m_users.end()) return;
+        it->second.setStatus(1);
+        it->second.setLoginDate(RcsUser::currentDateTime());
     }
-
-    if (user.getStatus() == 1)
-    {
-        emit userOffline(user);
-    }
+    saveUsersToFile();
 }
 
-void UserManager::setUserOnline(const QString &sn)
+void UserManager::setUserOffline(const std::string& sn)
 {
-    QMutexLocker locker(&m_mutex);
-    auto it = m_users.find(sn);
-    if (it != m_users.end())
     {
-        it.value().setStatus(1);
-        it.value().setLoginDate(QDateTime::currentDateTime());
-        RcsUser user = it.value();
-        locker.unlock();
-
-        saveUserToFile(user);
-        emit userOnline(user);
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto it = m_users.find(sn);
+        if (it == m_users.end()) return;
+        it->second.setStatus(0);
     }
+    saveUsersToFile();
 }
 
-void UserManager::setUserOffline(const QString &sn)
+bool UserManager::isUserOnline(const std::string& sn) const
 {
-    QMutexLocker locker(&m_mutex);
-    auto it = m_users.find(sn);
-    if (it != m_users.end())
-    {
-        it.value().setStatus(0);
-        RcsUser user = it.value();
-        locker.unlock();
-
-        saveUserToFile(user);
-        emit userOffline(user);
-    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = m_users.find(sn);
+    return it != m_users.end() && it->second.getStatus() == 1;
 }
 
-bool UserManager::isUserOnline(const QString &sn)
+void UserManager::saveUsersToFile()
 {
-    QMutexLocker locker(&m_mutex);
-    auto it = m_users.find(sn);
-    return (it != m_users.end()) && (it.value().getStatus() == 1);
-}
-
-QString UserManager::getUserDataFilePath() const
-{
-    QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir dir(dataDir);
-    if (!dir.exists())
+    nlohmann::json users = nlohmann::json::array();
     {
-        dir.mkpath(".");
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& entry : m_users) users.push_back(entry.second.toJson());
     }
-    return dir.filePath("users.json");
-}
-
-void UserManager::saveUserToFile(const RcsUser &user)
-{
-    QString filePath = getUserDataFilePath();
-
-    // Load existing data
-    QJsonArray usersArray;
-    QFile file(filePath);
-    if (file.open(QIODevice::ReadOnly))
-    {
-        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        if (doc.isArray())
-        {
-            usersArray = doc.array();
-        }
-        file.close();
-    }
-
-    // Update or add user
-    bool found = false;
-    for (int i = 0; i < usersArray.size(); ++i)
-    {
-        QJsonObject userObj = usersArray[i].toObject();
-        if (userObj["sn"].toString() == user.getSn())
-        {
-            usersArray[i] = user.toJson();
-            found = true;
-            break;
-        }
-    }
-
-    if (!found)
-    {
-        usersArray.append(user.toJson());
-    }
-
-    // Save to file
-    if (file.open(QIODevice::WriteOnly))
-    {
-        QJsonDocument doc(usersArray);
-        file.write(doc.toJson());
-        file.close();
-    }
+    const auto temporary = m_filePath.string() + ".tmp";
+    std::ofstream output(temporary, std::ios::trunc);
+    output << users.dump(2);
+    output.close();
+    std::error_code error;
+    std::filesystem::remove(m_filePath, error);
+    std::filesystem::rename(temporary, m_filePath, error);
+    if (error) LOG_ERROR("Failed to save user data: {}", error.message());
 }
 
 void UserManager::loadUsersFromFile()
 {
-    QString filePath = getUserDataFilePath();
-    QFile file(filePath);
-
-    if (!file.open(QIODevice::ReadOnly))
-    {
-        LOG_DEBUG("No existing user data file found, starting with empty user list");
-        return;
-    }
-
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-    file.close();
-
-    if (!doc.isArray())
-    {
-        LOG_WARN("Invalid user data file format");
-        return;
-    }
-
-    QJsonArray usersArray = doc.array();
-    QMutexLocker locker(&m_mutex);
-
-    for (const QJsonValue &value : usersArray)
-    {
-        if (value.isObject())
-        {
+    std::ifstream input(m_filePath);
+    if (!input) return;
+    try {
+        nlohmann::json users;
+        input >> users;
+        if (!users.is_array()) return;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& value : users) {
             RcsUser user;
-            user.fromJson(value.toObject());
-            // Set all users offline on startup
+            user.fromJson(value);
             user.setStatus(0);
             m_users[user.getSn()] = user;
         }
+        LOG_INFO("Loaded {} users from file", m_users.size());
+    } catch (const std::exception& error) {
+        LOG_WARN("Invalid user data file: {}", error.what());
     }
-
-    LOG_INFO("Loaded {} users from file", m_users.size());
 }

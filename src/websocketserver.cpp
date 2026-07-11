@@ -1,376 +1,232 @@
 #include "websocketserver.h"
 #include "logger_manager.h"
-#include <QUrlQuery>
-#include <QMutexLocker>
-#include <QJsonDocument>
-#include <QUuid>
 
-WebSocketServer::WebSocketServer(const QString &name, quint16 port, QObject *parent)
-    : QObject(parent)
-    , m_server(nullptr)
-    , m_serverName(name)
-    , m_port(port)
-    , m_userManager(&UserManager::instance())
-    , m_messageHandler(new MessageHandler(this, this))
-    , m_cleanupTimer(new QTimer(this))
+#include <algorithm>
+#include <chrono>
+#include <iomanip>
+#include <random>
+#include <sstream>
+#include <csignal>
+
+WebSocketServer::WebSocketServer(std::string name, std::uint16_t port)
+    : m_serverName(std::move(name)), m_port(port), m_userManager(UserManager::instance()), m_messageHandler(this)
 {
-    // Setup cleanup timer to periodically clean disconnected clients
-    m_cleanupTimer->setInterval(30000); // 30 seconds
-    connect(m_cleanupTimer, &QTimer::timeout, this, &WebSocketServer::onCleanupTimer);
+    m_endpoint.clear_access_channels(websocketpp::log::alevel::all);
+    m_endpoint.clear_error_channels(websocketpp::log::elevel::all);
+    m_endpoint.init_asio();
+    m_endpoint.set_reuse_addr(true);
+    m_endpoint.set_open_handler([this](ConnectionHandle handle) { onOpen(handle); });
+    m_endpoint.set_close_handler([this](ConnectionHandle handle) { onClose(handle); });
+    m_endpoint.set_fail_handler([this](ConnectionHandle handle) { onClose(handle); });
+    m_endpoint.set_message_handler([this](ConnectionHandle handle, WebSocketEndpoint::message_ptr message) {
+        onMessage(handle, std::move(message));
+    });
 }
 
-WebSocketServer::~WebSocketServer()
-{
-    stop();
-}
+WebSocketServer::~WebSocketServer() { stop(); }
 
 bool WebSocketServer::start()
 {
-    if (m_server) {
-        LOG_WARN("Server is already running");
-        return false;
-    }
-    
-    m_server = new QWebSocketServer(m_serverName, QWebSocketServer::NonSecureMode, this);
-    
-    connect(m_server, &QWebSocketServer::newConnection,
-            this, &WebSocketServer::onNewConnection);
-    
-    if (m_server->listen(QHostAddress::Any, m_port)) {
-        LOG_INFO("WebSocket服务器启动成功，监听端口: {}", m_port);
-        m_cleanupTimer->start();
-        emit serverStarted();
+    try {
+        m_endpoint.listen(m_port);
+        m_endpoint.start_accept();
+        m_listening = true;
+        m_cleanupTimer = std::make_unique<asio::steady_timer>(m_endpoint.get_io_service());
+        m_signals = std::make_unique<asio::signal_set>(m_endpoint.get_io_service(), SIGINT, SIGTERM);
+        m_signals->async_wait([this](const std::error_code&, int) { stop(); });
+        scheduleCleanup();
+        LOG_INFO("WebSocket server listening on port {}", m_port);
         return true;
-    } else {
-        QString errorString = m_server->errorString();
-        LOG_ERROR("WebSocket服务器启动失败: {}", errorString);
-        LOG_ERROR("尝试绑定端口 {} 失败，可能端口已被占用", m_port);
-        delete m_server;
-        m_server = nullptr;
-        emit serverError(errorString);
+    } catch (const std::exception& error) {
+        LOG_ERROR("Unable to listen on port {}: {}", m_port, error.what());
         return false;
     }
 }
+
+void WebSocketServer::run() { m_endpoint.run(); }
 
 void WebSocketServer::stop()
 {
-    if (!m_server) {
-        return;
-    }
-    
-    m_cleanupTimer->stop();
-    
-    // Close all client connections and release wrappers
-    QList<WebSocketClient*> clients;
-    QStringList sessions;
+    if (!m_listening.exchange(false)) return;
+    websocketpp::lib::error_code error;
+    m_endpoint.stop_listening(error);
+    if (m_cleanupTimer) m_cleanupTimer->cancel();
+    std::vector<std::shared_ptr<WebSocketClient>> clients;
     {
-        QMutexLocker locker(&m_clientsMutex);
-        clients = m_clients.values();
-        sessions = m_clients.keys();
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        for (const auto& entry : m_clients) clients.push_back(entry.second);
         m_clients.clear();
     }
-
-    for (const QString &sessionId : sessions) {
-        m_userManager->setUserOffline(sessionId);
+    for (const auto& client : clients) {
+        m_userManager.setUserOffline(client->getSessionId());
+        client->close();
     }
-
-    for (WebSocketClient *client : clients) {
-        if (!client) {
-            continue;
-        }
-        disconnect(client, nullptr, this, nullptr);
-        if (client->isConnected()) {
-            client->getSocket()->close();
-        }
-        client->deleteLater();
-    }
-    
-    m_server->close();
-    delete m_server;
-    m_server = nullptr;
-    
-    LOG_INFO("WebSocket服务器已停止");
-    emit serverStopped();
 }
 
-bool WebSocketServer::isListening() const
+std::size_t WebSocketServer::getOnlineCount() const
 {
-    return m_server && m_server->isListening();
-}
-
-int WebSocketServer::getOnlineCount() const
-{
-    QMutexLocker locker(&m_clientsMutex);
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
     return m_clients.size();
 }
 
-bool WebSocketServer::sendMessageToClient(const QString &sessionId, const QString &message)
+bool WebSocketServer::sendMessageToClient(const std::string& sessionId, const std::string& message)
 {
-    QPointer<WebSocketClient> client;
+    std::shared_ptr<WebSocketClient> client;
     {
-        QMutexLocker locker(&m_clientsMutex);
-        client = m_clients.value(sessionId, nullptr);
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        const auto it = m_clients.find(sessionId);
+        if (it != m_clients.end()) client = it->second;
     }
-
-    if (!client || !client->isConnected()) {
-        return false;
-    }
-
+    if (!client || !client->isConnected()) return false;
     client->sendMessage(message);
     return true;
 }
 
-void WebSocketServer::onNewConnection()
+void WebSocketServer::onOpen(ConnectionHandle handle)
 {
-    QWebSocket *socket = m_server->nextPendingConnection();
-    if (!socket) {
-        return;
-    }
-    
-    QString sessionId, hostname, installId;
-    if (!parseConnectionParams(socket, sessionId, hostname, installId)) {
-        LOG_WARN("Invalid connection parameters, closing connection");
-        socket->close();
-        socket->deleteLater();
+    auto connection = m_endpoint.get_con_from_hdl(handle);
+    const auto query = parseQuery(connection->get_resource());
+    const auto sessionIt = query.find("sessionId");
+    if (sessionIt == query.end() || sessionIt->second.empty()) {
+        websocketpp::lib::error_code error;
+        m_endpoint.close(handle, websocketpp::close::status::policy_violation, "sessionId is required", error);
         return;
     }
 
-    auto createUnusedSessionId = [this]() {
-        QString sessionId;
-        RcsUser existingUser;
-        do {
-            sessionId = QUuid::createUuid().toString().remove("{").remove("}").toUpper();
-        } while (m_userManager->tryGetRcsUserBySN(sessionId, existingUser));
-        return sessionId;
-    };
+    const auto sessionId = sessionIt->second;
+    const auto hostnameIt = query.find("hostname");
+    const auto installIt = query.find("installId");
+    const auto hostname = hostnameIt == query.end() ? "" : hostnameIt->second;
+    auto installId = installIt == query.end() ? "" : installIt->second;
+    std::transform(installId.begin(), installId.end(), installId.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
 
-    WebSocketClient *oldClient = nullptr;
-    bool duplicateInstall = false;
-    QString existingInstallId;
+    std::shared_ptr<WebSocketClient> oldClient;
+    std::string existingInstallId;
     {
-        QMutexLocker locker(&m_clientsMutex);
-        oldClient = m_clients.value(sessionId, nullptr);
-        if (oldClient && !installId.isEmpty() && !oldClient->getInstallId().isEmpty() && oldClient->getInstallId() != installId) {
-            duplicateInstall = true;
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        const auto it = m_clients.find(sessionId);
+        if (it != m_clients.end()) {
+            oldClient = it->second;
             existingInstallId = oldClient->getInstallId();
         }
     }
-
-    if (!duplicateInstall && !installId.isEmpty()) {
-        RcsUser existingUser;
-        if (m_userManager->tryGetRcsUserBySN(sessionId, existingUser) &&
-            !existingUser.getInstallId().isEmpty() &&
-            existingUser.getInstallId() != installId) {
-            duplicateInstall = true;
-            existingInstallId = existingUser.getInstallId();
-        }
-    }
-
-    if (duplicateInstall) {
-        const QString newSessionId = createUnusedSessionId();
-        LOG_WARN("Device id conflict: sessionId={} existingInstallId={} newInstallId={}, assigning {}",
-                 sessionId, existingInstallId, installId, newSessionId);
-        sendDeviceIdConflict(socket, sessionId, newSessionId);
-        QTimer::singleShot(200, socket, [socket]() {
-            socket->close();
-            socket->deleteLater();
-        });
+    RcsUser existingUser;
+    const bool knownUser = m_userManager.tryGetRcsUserBySN(sessionId, existingUser);
+    if (existingInstallId.empty() && knownUser) existingInstallId = existingUser.getInstallId();
+    if (!installId.empty() && !existingInstallId.empty() && installId != existingInstallId) {
+        const auto replacement = createSessionId();
+        nlohmann::json response = {{"type", "deviceIdConflict"}, {"sender", "server"}, {"receiver", sessionId},
+            {"data", {{"reason", "duplicate_uuid"}, {"oldSessionId", sessionId}, {"newSessionId", replacement}}}};
+        m_endpoint.send(handle, response.dump(), websocketpp::frame::opcode::text);
+        websocketpp::lib::error_code error;
+        m_endpoint.close(handle, websocketpp::close::status::policy_violation, "duplicate uuid", error);
         return;
     }
-    
-    // Create client wrapper
-    WebSocketClient *client = new WebSocketClient(socket, this);
-    setupClient(client, sessionId, hostname, installId);
-    
-    oldClient = nullptr;
 
-    // Add to client map
-    {
-        QMutexLocker locker(&m_clientsMutex);
-        // Remove existing client with same session ID if any
-        auto it = m_clients.find(sessionId);
-        if (it != m_clients.end()) {
-            oldClient = it.value();
-            m_clients.erase(it);
-        }
-        m_clients[sessionId] = client;
-    }
-
-    if (oldClient) {
-        disconnect(oldClient, nullptr, this, nullptr);
-        if (oldClient->isConnected()) {
-            oldClient->getSocket()->close();
-        }
-        oldClient->deleteLater();
-    }
-    
-    int count = getOnlineCount();
-    LOG_INFO("连接打开: {}-{}，当前连接数为：{}", hostname, sessionId, count);
-    
-    // Connect client signals
-    connect(client, &WebSocketClient::messageReceived,
-            this, &WebSocketServer::onClientMessageReceived);
-    connect(client, &WebSocketClient::disconnected,
-            this, &WebSocketServer::onClientDisconnected);
-    
-    emit clientConnected(client);
-}
-
-void WebSocketServer::onClientDisconnected()
-{
-    WebSocketClient *client = qobject_cast<WebSocketClient*>(sender());
-    if (!client) {
-        return;
-    }
-    
-    QString sessionId = client->getSessionId();
-    int nextCount = getOnlineCount();
-    if (nextCount > 0) {
-        --nextCount;
-    }
-    LOG_INFO("连接关闭: {}，当前连接数为：{}", sessionId, nextCount);
-
-    removeClient(client, true);
-}
-
-void WebSocketServer::onClientMessageReceived(const QString &message)
-{
-    WebSocketClient *client = qobject_cast<WebSocketClient*>(sender());
-    if (!client) {
-        return;
-    }
-    
-    m_messageHandler->handleMessage(client, message);
-    emit messageReceived(client, message);
-}
-
-void WebSocketServer::onCleanupTimer()
-{
-    cleanupDisconnectedClients();
-}
-
-bool WebSocketServer::parseConnectionParams(QWebSocket *socket, QString &sessionId, QString &hostname, QString &installId)
-{
-    QUrl url = socket->requestUrl();
-    QUrlQuery query(url);
-    
-    sessionId = query.queryItemValue("sessionId");
-    if (sessionId.isEmpty()) {
-        return false;
-    }
-    
-    hostname = query.queryItemValue("hostname");
-    installId = query.queryItemValue("installId").toUpper();
-    // hostname is optional
-    
-    return true;
-}
-
-void WebSocketServer::setupClient(WebSocketClient *client, const QString &sessionId, const QString &hostname, const QString &installId)
-{
+    auto client = std::make_shared<WebSocketClient>(m_endpoint, handle, connection->get_remote_endpoint());
     client->setSessionId(sessionId);
     client->setHostname(hostname);
     client->setInstallId(installId);
-    
-    // Create or update user record
-    RcsUser existingUser;
-    if (m_userManager->tryGetRcsUserBySN(sessionId, existingUser)) {
-        // Update existing user
-        existingUser.setStatus(1);
-        existingUser.setHostname(hostname);
-        existingUser.setInstallId(installId);
-        existingUser.setLoginIp(client->getRemoteAddress().toString());
-        existingUser.setLoginDate(QDateTime::currentDateTime());
-        m_userManager->updateRcsUser(existingUser);
-        client->setRcsUser(existingUser);
-    } else {
-        // Create new user
-        RcsUser newUser(sessionId, hostname, client->getRemoteAddress().toString());
-        newUser.setInstallId(installId);
-        m_userManager->insertRcsUser(newUser);
-        client->setRcsUser(newUser);
+    RcsUser user = knownUser ? existingUser : RcsUser(sessionId, hostname, client->getRemoteAddress());
+    user.setStatus(1);
+    user.setHostname(hostname);
+    user.setInstallId(installId);
+    user.setLoginIp(client->getRemoteAddress());
+    user.setLoginDate(RcsUser::currentDateTime());
+    client->setRcsUser(user);
+    m_userManager.updateRcsUser(user);
+    {
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        m_clients[sessionId] = client;
     }
+    if (oldClient) oldClient->close();
+    LOG_INFO("Client connected: {} from {} ({}), online={}", sessionId, client->getRemoteAddress(), hostname, getOnlineCount());
 }
 
-void WebSocketServer::sendDeviceIdConflict(QWebSocket *socket, const QString &oldSessionId, const QString &newSessionId)
+void WebSocketServer::onClose(ConnectionHandle handle)
 {
-    if (!socket) {
-        return;
+    const auto client = findByHandle(handle);
+    if (!client) return;
+    client->setDisconnected();
+    {
+        std::lock_guard<std::mutex> lock(m_clientsMutex);
+        const auto it = m_clients.find(client->getSessionId());
+        if (it != m_clients.end() && it->second == client) m_clients.erase(it);
     }
+    m_userManager.setUserOffline(client->getSessionId());
+    LOG_INFO("Client disconnected: {}, online={}", client->getSessionId(), getOnlineCount());
+}
 
-    QJsonObject data;
-    data["reason"] = "duplicate_uuid";
-    data["oldSessionId"] = oldSessionId;
-    data["newSessionId"] = newSessionId;
+void WebSocketServer::onMessage(ConnectionHandle handle, WebSocketEndpoint::message_ptr message)
+{
+    const auto client = findByHandle(handle);
+    if (client && message->get_opcode() == websocketpp::frame::opcode::text) m_messageHandler.handleMessage(client.get(), message->get_payload());
+}
 
-    QJsonObject message;
-    message["type"] = "deviceIdConflict";
-    message["sender"] = "server";
-    message["receiver"] = oldSessionId;
-    message["data"] = data;
+std::shared_ptr<WebSocketClient> WebSocketServer::findByHandle(ConnectionHandle handle) const
+{
+    std::owner_less<ConnectionHandle> less;
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    for (const auto& entry : m_clients) {
+        const auto candidate = entry.second->getHandle();
+        if (!less(candidate, handle) && !less(handle, candidate)) return entry.second;
+    }
+    return {};
+}
 
-    socket->sendTextMessage(QString::fromUtf8(QJsonDocument(message).toJson(QJsonDocument::Compact)));
-    socket->flush();
+void WebSocketServer::scheduleCleanup()
+{
+    m_cleanupTimer->expires_after(std::chrono::seconds(30));
+    m_cleanupTimer->async_wait([this](const std::error_code& error) {
+        if (!error && m_listening) {
+            cleanupDisconnectedClients();
+            scheduleCleanup();
+        }
+    });
 }
 
 void WebSocketServer::cleanupDisconnectedClients()
 {
-    QList<WebSocketClient*> toRemove;
-
-    {
-        QMutexLocker locker(&m_clientsMutex);
-        for (auto it = m_clients.begin(); it != m_clients.end(); ++it) {
-            if (!it.value()->isConnected()) {
-                toRemove.append(it.value());
-            }
-        }
-    }
-    
-    for (WebSocketClient *client : toRemove) {
-        removeClient(client, true);
-    }
-    
-    if (!toRemove.isEmpty()) {
-        LOG_DEBUG("清理了{}个断开的客户端连接", toRemove.size());
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    for (auto it = m_clients.begin(); it != m_clients.end();) {
+        if (!it->second->isConnected()) it = m_clients.erase(it); else ++it;
     }
 }
 
-void WebSocketServer::removeClient(WebSocketClient *client, bool notifyOffline)
+std::unordered_map<std::string, std::string> WebSocketServer::parseQuery(const std::string& resource)
 {
-    if (!client) {
-        return;
-    }
-
-    const QString sessionId = client->getSessionId();
-    bool removed = false;
-
-    {
-        QMutexLocker locker(&m_clientsMutex);
-        auto it = m_clients.find(sessionId);
-        if (it != m_clients.end() && it.value() == client) {
-            m_clients.erase(it);
-            removed = true;
+    const auto decode = [](const std::string& value) {
+        std::string decoded;
+        decoded.reserve(value.size());
+        for (std::size_t i = 0; i < value.size(); ++i) {
+            if (value[i] == '+' ) decoded.push_back(' ');
+            else if (value[i] == '%' && i + 2 < value.size()) {
+                const auto hex = value.substr(i + 1, 2);
+                try {
+                    decoded.push_back(static_cast<char>(std::stoul(hex, nullptr, 16)));
+                    i += 2;
+                } catch (...) { decoded.push_back(value[i]); }
+            } else decoded.push_back(value[i]);
         }
+        return decoded;
+    };
+    std::unordered_map<std::string, std::string> result;
+    const auto question = resource.find('?');
+    if (question == std::string::npos) return result;
+    std::istringstream input(resource.substr(question + 1));
+    std::string item;
+    while (std::getline(input, item, '&')) {
+        const auto equal = item.find('=');
+        result[decode(item.substr(0, equal))] = equal == std::string::npos ? "" : decode(item.substr(equal + 1));
     }
+    return result;
+}
 
-    if (!removed) {
-        disconnect(client, nullptr, this, nullptr);
-        if (client->isConnected()) {
-            client->getSocket()->close();
-        }
-        client->deleteLater();
-        return;
-    }
-
-    if (notifyOffline) {
-        m_userManager->setUserOffline(sessionId);
-    }
-
-    emit clientDisconnected(client);
-
-    disconnect(client, nullptr, this, nullptr);
-    if (client->isConnected()) {
-        client->getSocket()->close();
-    }
-    client->deleteLater();
+std::string WebSocketServer::createSessionId()
+{
+    static thread_local std::mt19937_64 random(std::random_device{}());
+    std::ostringstream out;
+    out << std::uppercase << std::hex << std::setfill('0');
+    for (int i = 0; i < 4; ++i) out << std::setw(8) << static_cast<std::uint32_t>(random());
+    return out.str();
 }

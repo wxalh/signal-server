@@ -9,53 +9,49 @@
       "name": "win64-msvc-release",
       "displayName": "win64-msvc-release",
       "generator": "Visual Studio 16 2019",
+      "binaryDir": "${sourceDir}/out/build/win64-msvc-release",
       "architecture": "x64",
       "toolset": "host=x64",
       "environment": {
         "VCINSTALLDIR": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/"
       },
-      "cacheVariables": {
-        "Qt5_DIR": "C:/Qt/5.15.2/msvc2019_64/lib/cmake/Qt5"
-      }
+      "cacheVariables": {}
     },
     {
       "name": "win64-msvc-debug",
       "displayName": "win64-msvc-debug",
       "generator": "Visual Studio 16 2019",
+      "binaryDir": "${sourceDir}/out/build/win64-msvc-debug",
       "architecture": "x64",
       "toolset": "host=x64",
       "environment": {
         "VCINSTALLDIR": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/"
       },
-      "cacheVariables": {
-        "Qt5_DIR": "C:/Qt/5.15.2/msvc2019_64/lib/cmake/Qt5"
-      }
+      "cacheVariables": {}
     },
     {
       "name": "win32-msvc-release",
       "displayName": "win32-msvc-release",
       "generator": "Visual Studio 16 2019",
+      "binaryDir": "${sourceDir}/out/build/win32-msvc-release",
       "architecture": "win32",
       "toolset": "host=x86",
       "environment": {
         "VCINSTALLDIR": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/"
       },
-      "cacheVariables": {
-        "Qt5_DIR": "C:/Qt/5.15.2/msvc2019/lib/cmake/Qt5"
-      }
+      "cacheVariables": {}
     },
     {
       "name": "win32-msvc-debug",
       "displayName": "win32-msvc-debug",
       "generator": "Visual Studio 16 2019",
+      "binaryDir": "${sourceDir}/out/build/win32-msvc-debug",
       "architecture": "win32",
       "toolset": "host=x86",
       "environment": {
         "VCINSTALLDIR": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/"
       },
-      "cacheVariables": {
-        "Qt5_DIR": "C:/Qt/5.15.2/msvc2019/lib/cmake/Qt5"
-      }
+      "cacheVariables": {}
     },
     {
       "name": "linux-x64",

@@ -1,69 +1,49 @@
-#ifndef WEBSOCKETSERVER_H
-#define WEBSOCKETSERVER_H
+#pragma once
 
-#include <QObject>
-#include <QWebSocketServer>
-#include <QWebSocket>
-#include <QHash>
-#include <QHostAddress>
-#include <QMutex>
-#include <QPointer>
-#include <QTimer>
-#include "websocketclient.h"
-#include "usermanager.h"
 #include "messagehandler.h"
+#include "usermanager.h"
+#include "websocketclient.h"
+#include "websocket_types.h"
 
-class WebSocketServer : public QObject
-{
-    Q_OBJECT
+#include <asio/steady_timer.hpp>
+#include <asio/signal_set.hpp>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
+class WebSocketServer {
 public:
-    explicit WebSocketServer(const QString &name, quint16 port = 8080, QObject *parent = nullptr);
+    WebSocketServer(std::string name, std::uint16_t port);
     ~WebSocketServer();
-
-    // Server control
     bool start();
+    void run();
     void stop();
-    bool isListening() const;
-
-    // Client management
-    int getOnlineCount() const;
-    bool sendMessageToClient(const QString &sessionId, const QString &message);
-
-    // Server info
-    quint16 getPort() const { return m_port; }
-    QString getServerName() const { return m_serverName; }
-
-signals:
-    void clientConnected(WebSocketClient *client);
-    void clientDisconnected(WebSocketClient *client);
-    void messageReceived(WebSocketClient *client, const QString &message);
-    void serverStarted();
-    void serverStopped();
-    void serverError(const QString &errorString);
-
-private slots:
-    void onNewConnection();
-    void onClientDisconnected();
-    void onClientMessageReceived(const QString &message);
-    void onCleanupTimer();
+    bool isListening() const { return m_listening; }
+    std::size_t getOnlineCount() const;
+    bool sendMessageToClient(const std::string& sessionId, const std::string& message);
+    std::uint16_t getPort() const { return m_port; }
+    const std::string& getServerName() const { return m_serverName; }
 
 private:
-    QWebSocketServer *m_server;
-    QString m_serverName;
-    quint16 m_port;
-    QHash<QString, WebSocketClient *> m_clients;
-    mutable QMutex m_clientsMutex;
-
-    UserManager *m_userManager;
-    MessageHandler *m_messageHandler;
-    QTimer *m_cleanupTimer;
-
-    bool parseConnectionParams(QWebSocket *socket, QString &sessionId, QString &hostname, QString &installId);
-    void setupClient(WebSocketClient *client, const QString &sessionId, const QString &hostname, const QString &installId);
-    void sendDeviceIdConflict(QWebSocket *socket, const QString &oldSessionId, const QString &newSessionId);
+    void onOpen(ConnectionHandle handle);
+    void onClose(ConnectionHandle handle);
+    void onMessage(ConnectionHandle handle, WebSocketEndpoint::message_ptr message);
+    void scheduleCleanup();
     void cleanupDisconnectedClients();
-    void removeClient(WebSocketClient *client, bool notifyOffline);
-};
+    std::shared_ptr<WebSocketClient> findByHandle(ConnectionHandle handle) const;
+    static std::unordered_map<std::string, std::string> parseQuery(const std::string& resource);
+    static std::string createSessionId();
 
-#endif // WEBSOCKETSERVER_H
+    WebSocketEndpoint m_endpoint;
+    std::string m_serverName;
+    std::uint16_t m_port;
+    mutable std::mutex m_clientsMutex;
+    std::unordered_map<std::string, std::shared_ptr<WebSocketClient>> m_clients;
+    UserManager& m_userManager;
+    MessageHandler m_messageHandler;
+    std::unique_ptr<asio::steady_timer> m_cleanupTimer;
+    std::unique_ptr<asio::signal_set> m_signals;
+    std::atomic_bool m_listening{false};
+};

@@ -1,140 +1,70 @@
-#include <QCoreApplication>
-#include <QDir>
-#include "websocketserver.h"
-#include "logger_manager.h"
 #include "config_util.h"
-/**
- * @brief isRunning 禁止多开
- * @return
- */
-#ifdef Q_OS_WINDOWS
+#include "logger_manager.h"
+#include "usermanager.h"
+#include "websocketserver.h"
+
+#include <filesystem>
+#include <iostream>
+#include <string_view>
+#ifdef _WIN32
 #include <Windows.h>
 #else
-#include <sys/file.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #endif
-bool isRunning()
-{
-#ifdef Q_OS_WINDOWS
-    // Windows 使用互斥锁
-    HANDLE hMutex = CreateMutexW(NULL, TRUE, L"Global\\airan_signal_server");
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
-    {
-        CloseHandle(hMutex);
-        return true;
-    }
-    return false;
-#else
-    // Linux/macOS 使用文件锁
-    static int lockFile = -1;
-    if (lockFile == -1)
-    {
-        QString lockPath = QDir::temp().absoluteFilePath("airan_signal_server.lock");
-        lockFile = open(lockPath.toLocal8Bit().constData(), O_RDWR | O_CREAT, 0644);
-    }
 
-    if (lockFile != -1 && flock(lockFile, LOCK_EX | LOCK_NB) == -1)
-    {
-        return true; // 已锁定表示程序已在运行
-    }
-    return false;
-#endif
+namespace {
+bool isVersionArgument(std::string_view argument)
+{
+    return argument == "-v" || argument == "-V" || argument == "--version" || argument == "-version";
 }
 
-static void setupConsoleEncoding()
+std::filesystem::path applicationDirectory(const char* argv0)
 {
-#ifdef Q_OS_WINDOWS
-    // Ensure console input/output use UTF-8 so spdlog UTF-8 text is displayed correctly.
+    std::error_code error;
+    auto path = std::filesystem::absolute(argv0, error);
+    return error ? std::filesystem::current_path() : path.parent_path();
+}
+
+bool isRunning()
+{
+#ifdef _WIN32
+    static HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Global\\airan_signal_server");
+    return GetLastError() == ERROR_ALREADY_EXISTS;
+#else
+    static int lockFile = open("/tmp/airan_signal_server.lock", O_RDWR | O_CREAT, 0644);
+    return lockFile != -1 && flock(lockFile, LOCK_EX | LOCK_NB) == -1;
+#endif
+}
+}
+
+int main(int argc, char* argv[])
+{
+    if (argc == 2 && isVersionArgument(argv[1])) {
+        std::cout << "signal_server " << SIGNAL_SERVER_VERSION << '\n';
+        return 0;
+    }
+
+#ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 #endif
-}
+    if (isRunning()) return 0;
 
-int main(int argc, char *argv[])
-{
-    setupConsoleEncoding();
+    const auto appDir = applicationDirectory(argv[0]);
+    ConfigUtil->load(appDir);
+    LoggerManager::instance().initialize();
+    LOG_INFO("Signal Server version {}", SIGNAL_SERVER_VERSION);
+    UserManager::instance().initialize(appDir);
 
-    QCoreApplication app(argc, argv);
-    if (isRunning())
-    {
-        return 0;
-    }
-    // Set application information
-    app.setApplicationName("Signal Server");
-    app.setApplicationVersion("1.0.0");
-    app.setOrganizationName("WXALH");
-    app.setOrganizationDomain("wxalh.com");
+    auto port = ConfigUtil->serverPort == 0 ? 8080 : ConfigUtil->serverPort;
+    WebSocketServer server(ConfigUtil->serverName, port);
+    if (!server.start()) return 1;
 
-    // Initialize configuration first
-    ConfigUtil; // This will initialize the singleton and load config.ini
-
-    // Get server configuration from config file
-    quint16 port = ConfigUtil->serverPort;
-    QString serverName = ConfigUtil->serverName;
-
-    // Validate configuration
-    if (port == 0)
-    {
-        LOG_ERROR("Invalid port number: {}, using default 8080", port);
-        port = 8080;
-    }
-
-    if (serverName.isEmpty())
-    {
-        serverName = "Signal Server";
-    }
-
-    LOG_INFO("Starting server with configuration:");
-    LOG_INFO("  Server Name: {}", serverName);
-    LOG_INFO("  Port: {}", port);
-    LOG_INFO("  Config file: {}", ConfigUtil->filePath);
-
-    // Create and start server
-    WebSocketServer server(serverName, port);
-
-    // Connect server signals for logging
-    QObject::connect(&server, &WebSocketServer::serverStarted, [&]()
-                     {
-        LOG_INFO("=== Signal Server Started ===");
-        LOG_INFO("Server Name: {}", server.getServerName());
-        LOG_INFO("Listening Port: {}", server.getPort());
-        LOG_INFO("WebSocket URL: ws://localhost:{}", server.getPort());
-        LOG_INFO("=============================="); });
-
-    QObject::connect(&server, &WebSocketServer::serverStopped, [&]()
-                     {
-        LOG_INFO("=== Signal Server Stopped ===");
-        app.quit(); });
-
-    QObject::connect(&server, &WebSocketServer::serverError, [&](const QString &error)
-                     {
-        LOG_ERROR("Server Error: {}", error);
-        app.quit(); });
-
-    QObject::connect(&server, &WebSocketServer::clientConnected, [&](WebSocketClient *client)
-                     { LOG_INFO("Client connected: {} from {} ({})",
-                                client->getSessionId(),
-                                client->getRemoteAddress().toString(),
-                                client->getHostname()); });
-
-    QObject::connect(&server, &WebSocketServer::clientDisconnected, [&](WebSocketClient *client)
-                     { LOG_INFO("Client disconnected: {}", client->getSessionId()); });
-
-    // Start the server
-    if (!server.start())
-    {
-        LOG_ERROR("Failed to start server");
-        return 1;
-    }
-
-    // Handle graceful shutdown
-    QObject::connect(&app, &QCoreApplication::aboutToQuit, [&]()
-                     {
-        LOG_INFO("Shutting down server...");
-        server.stop(); });
-
-    LOG_INFO("Press Ctrl+C to stop the server");
-
-    return app.exec();
+    LOG_INFO("Server Name: {}", server.getServerName());
+    LOG_INFO("WebSocket URL: ws://localhost:{}", server.getPort());
+    server.run();
+    LOG_INFO("Signal Server stopped");
+    return 0;
 }

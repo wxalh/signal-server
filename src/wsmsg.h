@@ -1,45 +1,32 @@
-#ifndef WSMSG_H
-#define WSMSG_H
+#pragma once
 
-#include <QString>
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QVariant>
+#include <string>
+#include <nlohmann/json.hpp>
 
-class WsMsg
-{
+class WsMsg {
 public:
-    WsMsg();
-    WsMsg(const QString &type, const QVariant &data, const QString &sender, const QString &receiver);
+    WsMsg() = default;
+    WsMsg(std::string type, nlohmann::json data, std::string sender, std::string receiver);
 
-    // Getters
-    QString getType() const { return m_type; }
-    QVariant getData() const { return m_data; }
-    QString getSender() const { return m_sender; }
-    QString getReceiver() const { return m_receiver; }
+    const std::string& getType() const { return m_type; }
+    const nlohmann::json& getData() const { return m_data; }
+    const std::string& getSender() const { return m_sender; }
+    const std::string& getReceiver() const { return m_receiver; }
+    void setType(std::string value) { m_type = std::move(value); }
+    void setData(nlohmann::json value) { m_data = std::move(value); }
+    void setSender(std::string value) { m_sender = std::move(value); }
+    void setReceiver(std::string value) { m_receiver = std::move(value); }
 
-    // Setters
-    void setType(const QString &type) { m_type = type; }
-    void setData(const QVariant &data) { m_data = data; }
-    void setSender(const QString &sender) { m_sender = sender; }
-    void setReceiver(const QString &receiver) { m_receiver = receiver; }
-
-    // JSON conversion
-    QJsonObject toJson() const;
-    void fromJson(const QJsonObject &json);
-    QString toJsonString() const;
-    static WsMsg fromJsonString(const QString &jsonString);
-
-    // Static error messages
-    static WsMsg createErrorNotFoundMsg(const QString &receiver);
-    static WsMsg createOfflineMsg(const QString &receiver);
-    static WsMsg createErrorPwdMsg(const QString &receiver);
+    nlohmann::json toJson() const;
+    std::string toJsonString() const;
+    static WsMsg fromJsonString(const std::string& jsonString);
+    static WsMsg createErrorNotFoundMsg(const std::string& receiver);
+    static WsMsg createOfflineMsg(const std::string& receiver);
+    static WsMsg createErrorPwdMsg(const std::string& receiver);
 
 private:
-    QString m_type;
-    QVariant m_data;
-    QString m_sender;
-    QString m_receiver;
+    std::string m_type;
+    nlohmann::json m_data;
+    std::string m_sender;
+    std::string m_receiver;
 };
-
-#endif // WSMSG_H

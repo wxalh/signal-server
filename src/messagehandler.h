@@ -1,31 +1,17 @@
-#ifndef MESSAGEHANDLER_H
-#define MESSAGEHANDLER_H
+#pragma once
 
-#include <QObject>
-#include <QString>
-#include <QJsonObject>
 #include "wsmsg.h"
+#include <string>
 
 class WebSocketClient;
 class WebSocketServer;
 
-class MessageHandler : public QObject
-{
-    Q_OBJECT
-
+class MessageHandler {
 public:
-    explicit MessageHandler(WebSocketServer *server, QObject *parent = nullptr);
-
-    // Message processing
-    void handleMessage(WebSocketClient *client, const QString &message);
-    void handleHeartbeat(WebSocketClient *client);
-    void handleSignalMessage(WebSocketClient *client, const WsMsg &wsMsg, const QString &message);
+    explicit MessageHandler(WebSocketServer* server) : m_server(server) {}
+    void handleMessage(WebSocketClient* client, const std::string& message);
 
 private:
-    WebSocketServer *m_server;
-
-    void sendErrorMessage(WebSocketClient *client, const QString &errorMsg, const QString &type = "error");
-    bool validateMessage(const WsMsg &wsMsg);
+    WebSocketServer* m_server;
+    void handleSignalMessage(WebSocketClient* client, const WsMsg& message, const std::string& original);
 };
-
-#endif // MESSAGEHANDLER_H
