@@ -1,0 +1,177 @@
+name: Build packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  linux-package:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            zig_target: x86_64-linux-gnu.2.17
+          - arch: arm64
+            zig_target: aarch64-linux-gnu.2.17
+          - arch: armhf
+            zig_target: arm-linux-gnueabihf.2.17
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build patchelf file
+          curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz | sudo tar -xJ --strip-components=1 -C /usr/local
+
+      - name: Build portable glibc ${{ matrix.arch }} package
+        env:
+          ZIG: /usr/local/zig
+          ZIG_TARGET: ${{ matrix.zig_target }}
+          PACKAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          chmod +x packaging/*.sh
+          ./packaging/build-linux.sh
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-server-linux-${{ matrix.arch }}
+          path: |
+            dist/signal-server-linux-${{ matrix.arch }}.tar.gz
+            dist/signal-server-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+
+  windows-package:
+    name: Windows ${{ matrix.arch }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cmake_arch: x64
+          - arch: x86
+            cmake_arch: Win32
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure and build Release
+        shell: pwsh
+        run: |
+          cmake -S . -B "out/build/windows-${{ matrix.arch }}" `
+            -G "Visual Studio 17 2022" -A "${{ matrix.cmake_arch }}"
+          cmake --build "out/build/windows-${{ matrix.arch }}" `
+            --config Release --parallel
+
+      - name: Install and package
+        shell: pwsh
+        run: |
+          $package = "signal-server-windows-${{ matrix.arch }}"
+          $stage = Join-Path $PWD "dist/$package"
+          cmake --install "out/build/windows-${{ matrix.arch }}" `
+            --config Release --prefix $stage
+          Compress-Archive -Path $stage -DestinationPath "dist/$package.zip"
+          $hash = (Get-FileHash "dist/$package.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $package.zip" | Set-Content "dist/$package.zip.sha256" -Encoding ascii
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-server-windows-${{ matrix.arch }}
+          path: |
+            dist/signal-server-windows-${{ matrix.arch }}.zip
+            dist/signal-server-windows-${{ matrix.arch }}.zip.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - linux-package
+      - windows-package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(sed -n 's/^project(signal_server VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt | head -1)
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release notes
+        run: git log -1 --format=%B "$GITHUB_SHA" > release-notes.txt
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Prepare versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG" --force
+
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "signal-server $TAG" \
+            --notes-file release-notes.txt \
+            --latest=false
+          while IFS= read -r file; do
+            gh release upload "$TAG" "$file"
+          done < <(find release-artifacts -type f -print | LC_ALL=C sort)
+
+      - name: Prepare latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view latest >/dev/null 2>&1; then
+            gh release delete latest --yes
+          fi
+          git tag -f latest "$GITHUB_SHA"
+          git push origin refs/tags/latest --force
+
+      - name: Publish latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create latest \
+            --title "signal-server latest" \
+            --notes-file release-notes.txt \
+            --latest
+          while IFS= read -r file; do
+            gh release upload latest "$file"
+          done < <(find release-artifacts -type f -print | LC_ALL=C sort)

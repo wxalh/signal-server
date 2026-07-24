@@ -1,0 +1,4 @@
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_CXX_COMPILER "${CMAKE_CURRENT_LIST_DIR}/zig-cxx.sh")
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(SIGNAL_SERVER_PORTABLE_GLIBC ON CACHE BOOL "Statically link the C++ runtime while using the target glibc" FORCE)
