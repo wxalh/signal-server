@@ -16,6 +16,7 @@ public:
     void setData(nlohmann::json value) { m_data = std::move(value); }
     void setSender(std::string value) { m_sender = std::move(value); }
     void setReceiver(std::string value) { m_receiver = std::move(value); }
+    void setRole(std::string value) { m_role = std::move(value); }
 
     nlohmann::json toJson() const;
     std::string toJsonString() const;
@@ -29,4 +30,5 @@ private:
     nlohmann::json m_data;
     std::string m_sender;
     std::string m_receiver;
+    std::string m_role;
 };

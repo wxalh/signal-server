@@ -1,0 +1,15 @@
+{
+  ".url": {
+    "signal-server.settings": {
+      "title": "Signal Server",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/signal-server",
+      "gatewaySocket": "settings.sock",
+      "url": "/app/signal-server/",
+      "allUsers": false,
+      "control": { "accessPerm": "readonly" }
+    }
+  }
+}

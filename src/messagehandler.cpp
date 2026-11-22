@@ -21,6 +21,8 @@ void MessageHandler::handleMessage(WebSocketClient* client, const std::string& m
 void MessageHandler::handleSignalMessage(WebSocketClient* client, const NormalizedForwardMessage& message)
 {
     if (!m_server->sendMessageToClient(message.receiver, message.payload)) {
-        client->sendMessage(WsMsg::createOfflineMsg(client->getSessionId()).toJsonString());
+        WsMsg offline = WsMsg::createOfflineMsg(client->getSessionId());
+        offline.setRole(message.role);
+        client->sendMessage(offline.toJsonString());
     }
 }

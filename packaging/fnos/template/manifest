@@ -1,0 +1,13 @@
+appname=signal-server
+version=@VERSION@
+display_name=Signal Server
+desc=WebSocket 信令服务与 coturn 中继服务。
+source=thirdparty
+platform=@PLATFORM@
+maintainer=wxalh
+maintainer_url=https://github.com/wxalh/signal-server
+desktop_uidir=ui
+desktop_applaunchname=signal-server.settings
+ctl_stop=true
+checkport=false
+disable_authorization_path=true

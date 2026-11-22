@@ -3,6 +3,11 @@
 
 一个轻量的 C++17 WebSocket 信令服务器，支持实时通信与消息转发。
 
+## 飞牛 OS（fnOS）
+
+支持 x86_64（`signal-server-fnos-<版本>-amd64.fpk`）和 ARM64（`signal-server-fnos-<版本>-arm64.fpk`）。可从 GitHub Actions 的构建产物、已发布的 [GitHub Releases](https://github.com/wxalh/signal-server/releases) 或本地打包获取 `.fpk`，再通过飞牛 **应用中心 → 手动安装** 上传并启动。
+
+打开飞牛桌面的 **Signal Server** 图标，配置 WebSocket 信令和包内的 coturn。管理页根据已保存的设置列出 **NAT 端口映射**；需要公网访问时，按清单在路由器上设置转发。详见 [飞牛 OS 安装与配置指南](FNOS_SETUP.md)。
 
 ## 功能特性
 

@@ -45,6 +45,10 @@ NormalizedForwardMessage normalizeForwardedMessage(const std::string& payload,
         return result;
     }
 
+    const auto role = object.find("role");
+    if (role != object.end() && role->is_string())
+        result.role = role->get<std::string>();
+
     object["sender"] = sessionId;
     if (type->get_ref<const std::string&>() == "connect") {
         object["source_ip"] = normalizeRemoteEndpointAddress(remoteEndpoint);

@@ -83,6 +83,18 @@ jobs:
           $stage = Join-Path $PWD "dist/$package"
           cmake --install "out/build/windows-${{ matrix.arch }}" `
             --config Release --prefix $stage
+          foreach ($requiredLicense in @(
+            "licenses/LICENSE",
+            "licenses/LEGAL_NOTICE.md",
+            "licenses/THIRD_PARTY_NOTICES.md",
+            "licenses/asio-LICENSE_1_0.txt",
+            "licenses/websocketpp-LICENSE.txt",
+            "licenses/nlohmann-json-LICENSE.txt",
+            "licenses/spdlog-LICENSE.txt")) {
+            if (-not (Test-Path (Join-Path $stage $requiredLicense))) {
+              throw "Windows package missing $requiredLicense"
+            }
+          }
           Compress-Archive -Path $stage -DestinationPath "dist/$package.zip"
           $hash = (Get-FileHash "dist/$package.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $package.zip" | Set-Content "dist/$package.zip.sha256" -Encoding ascii
@@ -96,12 +108,50 @@ jobs:
             dist/signal-server-windows-${{ matrix.arch }}.zip.sha256
           if-no-files-found: error
 
+  fnos-package:
+    name: fnOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Build and exercise the fnOS package on Debian 12
+        env:
+          FNOS_ARCH: ${{ matrix.arch }}
+        run: |
+          docker run --rm --volume "$PWD:/source" --workdir /source \
+            --env FNOS_ARCH golang:1.25-bookworm bash -euc '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                ca-certificates cmake curl file libevent-dev libssl-dev ninja-build pkg-config python3
+              bash packaging/build-fnos.sh
+              python3 packaging/fnos/tests/smoke.py dist/*-"$FNOS_ARCH".fpk
+            '
+      - name: Upload fnOS package and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-server-fnos-${{ matrix.arch }}
+          path: |
+            dist/*-${{ matrix.arch }}.fpk
+            dist/*-${{ matrix.arch }}.fpk.sha256
+          if-no-files-found: error
+
   release:
     name: Publish release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - linux-package
       - windows-package
+      - fnos-package
     runs-on: ubuntu-24.04
     permissions:
       contents: write

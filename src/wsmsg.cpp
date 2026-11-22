@@ -5,7 +5,9 @@ WsMsg::WsMsg(std::string type, nlohmann::json data, std::string sender, std::str
 
 nlohmann::json WsMsg::toJson() const
 {
-    return {{"type", m_type}, {"data", m_data}, {"sender", m_sender}, {"receiver", m_receiver}};
+    nlohmann::json result = {{"type", m_type}, {"data", m_data}, {"sender", m_sender}, {"receiver", m_receiver}};
+    if (!m_role.empty()) result["role"] = m_role;
+    return result;
 }
 
 std::string WsMsg::toJsonString() const { return toJson().dump(); }

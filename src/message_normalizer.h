@@ -5,6 +5,7 @@
 struct NormalizedForwardMessage {
     bool valid{false};
     std::string receiver;
+    std::string role;
     std::string payload;
     std::string error;
 };

@@ -13,10 +13,20 @@ cp -a "${prefix}/signal_server" "${stage}/"
 find "${prefix}" -maxdepth 1 -type f -name '*.ini' -exec cp -a {} "${stage}/" \;
 mkdir -p "${stage}/licenses"
 cp -a "${repo}/LICENSE" "${stage}/licenses/project-LICENSE"
+cp -a "${repo}/LEGAL_NOTICE.md" "${stage}/licenses/LEGAL_NOTICE.md"
+cp -a "${repo}/THIRD_PARTY_NOTICES.md" "${stage}/licenses/THIRD_PARTY_NOTICES.md"
 cp -a "${repo}/third_party/spdlog/LICENSE" "${stage}/licenses/spdlog-LICENSE"
 cp -a "${repo}/third_party/asio/asio/LICENSE_1_0.txt" "${stage}/licenses/asio-LICENSE"
 cp -a "${repo}/third_party/websocketpp/COPYING" "${stage}/licenses/websocketpp-LICENSE"
 cp -a "${repo}/third_party/json/LICENSE.MIT" "${stage}/licenses/nlohmann-json-LICENSE"
+for required_notice in \
+    project-LICENSE LEGAL_NOTICE.md THIRD_PARTY_NOTICES.md \
+    spdlog-LICENSE asio-LICENSE websocketpp-LICENSE nlohmann-json-LICENSE; do
+    if [[ ! -s "${stage}/licenses/${required_notice}" ]]; then
+        echo "ERROR: release package is missing license notice ${required_notice}" >&2
+        exit 1
+    fi
+done
 
 # Bundle every recursively resolved shared library except glibc and its loader.
 # Those two define the host ABI and must come from the target system.

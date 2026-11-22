@@ -2,6 +2,8 @@
 
 本文档介绍如何在Ubuntu 22.04系统上安装和配置CoTURN服务器，为WebRTC应用提供NAT穿透支持。
 
+在飞牛 OS 上可使用集成 coturn 的 Signal Server `.fpk`，并从飞牛桌面配置。请参阅 [飞牛 OS 安装与配置指南](FNOS_SETUP.md)。
+
 ## 系统要求
 
 - **操作系统**：Ubuntu 22.04 LTS（推荐）

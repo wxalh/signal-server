@@ -3,6 +3,7 @@
 #include "usermanager.h"
 #include "websocketserver.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string_view>
@@ -27,13 +28,14 @@ std::filesystem::path applicationDirectory(const char* argv0)
     return error ? std::filesystem::current_path() : path.parent_path();
 }
 
-bool isRunning()
+bool isRunning(const std::filesystem::path& lockPath)
 {
 #ifdef _WIN32
+    (void)lockPath;
     static HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Global\\airan_signal_server");
     return GetLastError() == ERROR_ALREADY_EXISTS;
 #else
-    static int lockFile = open("/tmp/airan_signal_server.lock", O_RDWR | O_CREAT, 0644);
+    static int lockFile = open(lockPath.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
     return lockFile != -1 && flock(lockFile, LOCK_EX | LOCK_NB) == -1;
 #endif
 }
@@ -50,9 +52,19 @@ int main(int argc, char* argv[])
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 #endif
-    if (isRunning()) return 0;
+    auto appDir = applicationDirectory(argv[0]);
+    std::filesystem::path lockPath = "/tmp/airan_signal_server.lock";
+    if (const char* dataDir = std::getenv("SIGNAL_SERVER_DATA_DIR"); dataDir && *dataDir) {
+        appDir = dataDir;
+        std::error_code error;
+        if (!appDir.is_absolute() || !std::filesystem::is_directory(appDir, error)) {
+            std::cerr << "SIGNAL_SERVER_DATA_DIR must name an existing absolute directory\n";
+            return 1;
+        }
+        lockPath = appDir / "signal_server.lock";
+    }
+    if (isRunning(lockPath)) return 0;
 
-    const auto appDir = applicationDirectory(argv[0]);
     ConfigUtil->load(appDir);
     LoggerManager::instance().initialize();
     LOG_INFO("Signal Server version {}", SIGNAL_SERVER_VERSION);

@@ -8,9 +8,10 @@ Asio、WebSocket++、nlohmann/json 和 spdlog 均使用 `third_party` 中锁定�
 它使用 Zig 的 glibc 2.17 交叉编译目标，为 x86_64、arm64 和 armhf 架构生成兼容 glibc 的
 可执行文件。C++ runtime 和第三方依赖静态链接，glibc 和动态加载器由目标系统提供。工作流会构建
 Linux x86_64、arm64、armhf 和 Windows x64、x86 五个平台包及其 SHA-256
-校验文件。
+校验文件。另外会在 Debian 12 上构建 x86_64 和 ARM64 两个飞牛 OS `.fpk` 包，详见
+[飞牛 OS 本地打包说明](FNOS_SETUP.md#本地构建)。
 
-每次推送到 `main` 后，五个平台会并行构建。全部成功后，工作流读取 `CMakeLists.txt` 中的项目
+每次推送到 `main` 后，七个包会并行构建。全部成功后，工作流读取 `CMakeLists.txt` 中的项目
 版本，强制移动 `v<版本>` 和 `latest` tag 到本次提交，并删除、重建对应的两个 GitHub Release。
 例如项目版本为 `1.0.0` 时，会更新 `v1.0.0` 和 `latest`：
 

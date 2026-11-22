@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>信令与 TURN 服务</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>信令与 TURN 服务</h1>
+    <a class="refresh" href="./">刷新状态</a>
+  </header>
+  <dl class="status-list" aria-label="服务状态">
+    <div><dt>WebSocket 信令</dt><dd class="status {{if .SignalRunning}}running{{end}}">{{.SignalStatus}}</dd></div>
+    <div><dt>coturn</dt><dd class="status {{if .TurnRunning}}running{{end}}">{{.TurnStatus}}</dd></div>
+  </dl>
+  {{if .Notice}}<p class="message success" role="status">{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="message error" role="alert">{{.Error}}</p>{{end}}
+  <section class="nat-mapping" aria-labelledby="nat-heading">
+    <h2 id="nat-heading">NAT 端口映射</h2>
+    <p id="nat-source">按已保存配置显示。跨公网且服务位于 NAT 后时使用；仅局域网访问无需转发。</p>
+    {{$s := .Settings}}
+    <table id="nat-ports" aria-labelledby="nat-heading" aria-describedby="nat-source nat-target">
+      <thead>
+        <tr><th scope="col">用途</th><th scope="col">协议</th><th scope="col">端口</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">WebSocket 信令</th><td>TCP</td><td><code>{{$s.SignalPort}}</code></td></tr>
+        <tr><th scope="row">STUN / TURN 监听</th><td>TCP / UDP</td><td><code>{{$s.TurnPort}}</code></td></tr>
+        <tr><th scope="row">TURN 中继</th><td>UDP</td><td><code>{{template "relay-ports" $s}}</code></td></tr>
+        <tr><th scope="row">TURN TCP 中继</th><td>TCP（按需）</td><td><code>{{template "relay-ports" $s}}</code></td></tr>
+      </tbody>
+    </table>
+    <p id="nat-target">映射目标为 NAS 的内网 IP。中继范围的公网和内网端口须一致。普通 WebRTC 连接不需要 TCP 中继端口。</p>
+  </section>
+  <form method="post" action="./" autocomplete="off">
+    <input type="hidden" name="action" value="save">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <fieldset>
+      <legend>信令</legend>
+      <div class="fields">
+        <label>WebSocket 端口（TCP）
+          <input type="number" name="signal_port" min="1024" max="65535" value="{{.Settings.SignalPort}}" required>
+        </label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>coturn</legend>
+      <div class="fields">
+        <label>STUN / TURN 端口（TCP、UDP）
+          <input type="number" name="turn_port" min="1024" max="65535" value="{{.Settings.TurnPort}}" required>
+        </label>
+        <label>Realm
+          <input type="text" name="realm" maxlength="128" value="{{.Settings.Realm}}" spellcheck="false" required>
+        </label>
+        <label>中继起始端口
+          <input type="number" name="relay_min" min="1024" max="65535" value="{{.Settings.RelayMin}}" required>
+        </label>
+        <label>中继结束端口
+          <input type="number" name="relay_max" min="1024" max="65535" value="{{.Settings.RelayMax}}" required>
+        </label>
+        <label class="wide">外部地址 <span>可选</span>
+          <input type="text" name="external_ip" maxlength="31" value="{{.Settings.ExternalIP}}"
+                 placeholder="外部 IPv4 或 外部 IPv4 / 内网 IPv4" spellcheck="false">
+        </label>
+        <label>TURN 用户名
+          <input type="text" name="turn_user" maxlength="128" value="{{.Settings.TurnUser}}" spellcheck="false" required>
+        </label>
+        <label>新 TURN 密码
+          <input type="password" name="turn_password" minlength="12" maxlength="128" autocomplete="new-password" placeholder="留空保留现有密码">
+        </label>
+      </div>
+      <details>
+        <summary>查看现有 TURN 密码</summary>
+        <code>{{.Settings.TurnPassword}}</code>
+      </details>
+    </fieldset>
+    <footer>
+      <button type="submit">保存并应用</button>
+      <p>应用更改时，对应服务会短暂断开。</p>
+    </footer>
+  </form>
+</main>
+</body>
+</html>
+{{define "relay-ports"}}{{.RelayMin}}{{if ne .RelayMin .RelayMax}}–{{.RelayMax}}{{end}}{{end}}

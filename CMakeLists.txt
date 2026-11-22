@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(signal_server VERSION 1.1.1 LANGUAGES CXX)
+project(signal_server VERSION 1.1.2 LANGUAGES CXX)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     message(FATAL_ERROR "In-source builds are disabled. Use a preset or configure with -B out/build/<name>.")
@@ -87,6 +87,33 @@ include(GNUInstallDirs)
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION .)
 file(GLOB CONFIG_INIS "${CMAKE_CURRENT_SOURCE_DIR}/*.ini")
 install(FILES ${CONFIG_INIS} DESTINATION .)
+install(FILES
+    LICENSE
+    LEGAL_NOTICE.md
+    THIRD_PARTY_NOTICES.md
+    README.md
+    DESTINATION licenses
+)
+install(FILES
+    "${THIRD_PARTY_DIR}/asio/asio/LICENSE_1_0.txt"
+    DESTINATION licenses
+    RENAME asio-LICENSE_1_0.txt
+)
+install(FILES
+    "${THIRD_PARTY_DIR}/websocketpp/COPYING"
+    DESTINATION licenses
+    RENAME websocketpp-LICENSE.txt
+)
+install(FILES
+    "${THIRD_PARTY_DIR}/json/LICENSE.MIT"
+    DESTINATION licenses
+    RENAME nlohmann-json-LICENSE.txt
+)
+install(FILES
+    "${THIRD_PARTY_DIR}/spdlog/LICENSE"
+    DESTINATION licenses
+    RENAME spdlog-LICENSE.txt
+)
 
 foreach(config ${CONFIG_INIS})
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
